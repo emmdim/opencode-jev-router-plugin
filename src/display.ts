@@ -163,9 +163,26 @@ function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? "" : "s"}`
 }
 
+/** Session state shown by the status command. */
+export interface StatusOptions {
+    /** False when routing is switched off for the session. */
+    routingEnabled?: boolean
+}
+
 /** One-line status for the TUI. */
-export function describeStatus(decision: StoredDecision | undefined, usage: JevUsageStats): string {
-    const parts = [plural(usage.requests, "classifier call"), `$${usage.cost.toFixed(8)}`]
+export function describeStatus(
+    decision: StoredDecision | undefined,
+    usage: JevUsageStats,
+    options: StatusOptions = {},
+): string {
+    const parts: string[] = []
+
+    if (options.routingEnabled === false) {
+        parts.push("routing off")
+    }
+
+    parts.push(plural(usage.requests, "classifier call"), `$${usage.cost.toFixed(8)}`)
+
     if (decision?.resolved) {
         parts.push(`last → ${decision.resolved.provider}/${decision.resolved.model}`)
     }
@@ -173,9 +190,14 @@ export function describeStatus(decision: StoredDecision | undefined, usage: JevU
 }
 
 /** Machine-readable status block, same `key: value` style as the decision block. */
-export function formatStatus(decision: StoredDecision | undefined, usage: JevUsageStats): string {
+export function formatStatus(
+    decision: StoredDecision | undefined,
+    usage: JevUsageStats,
+    options: StatusOptions = {},
+): string {
     const lines = [
         "[JEV ROUTER STATUS]",
+        `routing: ${options.routingEnabled === false ? "off" : "on"}`,
         `requests: ${usage.requests}`,
         `input_tokens: ${usage.inputTokens}`,
         `output_tokens: ${usage.outputTokens}`,

@@ -3,7 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { decisionKey, loadDecision } from "../src/decision.ts"
+import {
+    decisionKey,
+    loadDecision,
+    routingDisabledKey,
+    setRoutingDisabled,
+} from "../src/decision.ts"
 import { getUsage, usageKey } from "../src/usage.ts"
 import { makeDecisionFixture } from "./support/fixtures.ts"
 import { createRouterHarness, makeHistoryMessage, makePromptEvent } from "./support/harness.ts"
@@ -345,6 +350,78 @@ describe("onError", () => {
 
         expect(harness.calls.switchModel).toHaveLength(0)
         expect(harness.calls.synthetic).toHaveLength(0)
+    })
+})
+
+describe("routing toggle", () => {
+    test("does not classify or switch the model while routing is off", async () => {
+        const harness = createRouterHarness({ messages: HISTORY })
+        await setRoutingDisabled(harness.storage, "ses_test", true)
+
+        await harness.prompt(makePromptEvent())
+
+        expect(harness.fetchCalls).toHaveLength(0)
+        expect(harness.calls.switchModel).toHaveLength(0)
+        expect(harness.calls.synthetic).toHaveLength(0)
+    })
+
+    test("clears the routed model when a later prompt is not routed", async () => {
+        const harness = createRouterHarness({ messages: HISTORY })
+
+        await harness.prompt(makePromptEvent())
+        expect((await loadDecision(harness.storage, "ses_test"))?.resolved).toEqual({
+            provider: "openrouter",
+            model: "deepseek/deepseek-v4-pro-0813",
+        })
+
+        await setRoutingDisabled(harness.storage, "ses_test", true)
+        await harness.prompt({ ...makePromptEvent(), messageID: "msg_next" })
+
+        expect((await loadDecision(harness.storage, "ses_test"))?.resolved).toBeUndefined()
+    })
+
+    test("does not switch the model when the toggle flips during classification", async () => {
+        const harness = createRouterHarness({
+            messages: HISTORY,
+            fetch: () => {
+                // The user switches routing off while the classifier is running.
+                harness.storage.map.set(routingDisabledKey("ses_test"), true)
+                return new Response(JSON.stringify(makeDecisionFixture()))
+            },
+        })
+
+        await harness.prompt(makePromptEvent())
+
+        expect(harness.calls.switchModel).toHaveLength(0)
+        expect((await loadDecision(harness.storage, "ses_test"))?.resolved).toBeUndefined()
+    })
+
+    test("does not switch to the fallback model when the toggle flips during a failure", async () => {
+        const harness = createRouterHarness({
+            messages: HISTORY,
+            fetch: () => {
+                harness.storage.map.set(routingDisabledKey("ses_test"), true)
+                return new Response("classifier down", { status: 500 })
+            },
+        })
+
+        await harness.prompt(makePromptEvent())
+
+        expect(harness.calls.switchModel).toHaveLength(0)
+    })
+
+    test("routes again after the toggle is switched back on", async () => {
+        const harness = createRouterHarness({ messages: HISTORY })
+        await setRoutingDisabled(harness.storage, "ses_test", true)
+
+        await harness.prompt(makePromptEvent())
+        expect(harness.fetchCalls).toHaveLength(0)
+
+        await setRoutingDisabled(harness.storage, "ses_test", false)
+        await harness.prompt({ ...makePromptEvent(), messageID: "msg_next" })
+
+        expect(harness.fetchCalls).toHaveLength(1)
+        expect(harness.calls.switchModel).toHaveLength(1)
     })
 })
 

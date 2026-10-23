@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { normalizeConfig } from "../src/config.ts"
-import { decisionKey, loadDecision, pickTier, resolveModel, saveDecision } from "../src/decision.ts"
+import {
+    decisionKey,
+    isRoutingDisabled,
+    loadDecision,
+    pickTier,
+    resolveModel,
+    routingDisabledKey,
+    saveDecision,
+    setRoutingDisabled,
+} from "../src/decision.ts"
 import { makeDecisionFixture } from "./support/fixtures.ts"
 import { FakeStorage } from "./support/harness.ts"
 
@@ -119,5 +128,42 @@ describe("decision persistence", () => {
 
         storage.map.set(decisionKey("ses_bad"), "not-a-decision")
         expect(await loadDecision(storage, "ses_bad")).toBeUndefined()
+    })
+})
+
+describe("routing toggle", () => {
+    test("is off by default", async () => {
+        const storage = new FakeStorage()
+        expect(await isRoutingDisabled(storage, "ses_1")).toBe(false)
+    })
+
+    test("stores and clears the disabled flag", async () => {
+        const storage = new FakeStorage()
+
+        await setRoutingDisabled(storage, "ses_1", true)
+        expect(storage.map.get(routingDisabledKey("ses_1"))).toBe(true)
+        expect(await isRoutingDisabled(storage, "ses_1")).toBe(true)
+
+        await setRoutingDisabled(storage, "ses_1", false)
+        expect(await isRoutingDisabled(storage, "ses_1")).toBe(false)
+    })
+
+    test("falls back to an explicit false when storage cannot delete", async () => {
+        const values = new Map<string, unknown>()
+        const storage = {
+            async get(key: string) {
+                return values.get(key)
+            },
+            async set(key: string, value: unknown) {
+                values.set(key, value)
+            },
+        }
+
+        await setRoutingDisabled(storage, "ses_1", true)
+        expect(await isRoutingDisabled(storage, "ses_1")).toBe(true)
+
+        await setRoutingDisabled(storage, "ses_1", false)
+        expect(values.get(routingDisabledKey("ses_1"))).toBe(false)
+        expect(await isRoutingDisabled(storage, "ses_1")).toBe(false)
     })
 })

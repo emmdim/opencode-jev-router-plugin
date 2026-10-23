@@ -85,7 +85,7 @@ describe("plugin entrypoint", () => {
         expect(plugin.id).toBe("opencode-jev-router-plugin")
     })
 
-    test("registers the prompt hook, scoped context hooks and /jev, and disposes them", async () => {
+    test("registers the prompt hook, scoped context hooks and the /jev commands, and disposes them", async () => {
         const fake = fakeContext({})
 
         const cleanup = await plugin.setup(fake.ctx)
@@ -95,7 +95,7 @@ describe("plugin entrypoint", () => {
             { name: "context", providerID: "openrouter" },
             { name: "context", providerID: "openai" },
         ])
-        expect(fake.commands).toEqual(["jev"])
+        expect(fake.commands).toEqual(["jev", "jev-off", "jev-on"])
         expect(typeof cleanup).toBe("function")
         if (typeof cleanup === "function") {
             await cleanup()

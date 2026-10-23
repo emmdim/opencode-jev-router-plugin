@@ -1,5 +1,11 @@
 import type { RuntimeConfig } from "./config.ts"
-import { type JsonStorage, loadDecision, resolveModel, saveDecision } from "./decision.ts"
+import {
+    isRoutingDisabled,
+    type JsonStorage,
+    loadDecision,
+    resolveModel,
+    saveDecision,
+} from "./decision.ts"
 import { describeDecision, formatDecisionBlock } from "./display.ts"
 import { buildConversation, type HistoryMessage } from "./history.ts"
 import {
@@ -87,6 +93,19 @@ export function createPromptRouter(deps: PromptRouterDeps) {
         }
     }
 
+    /**
+     * Toggle state for the session. A storage failure must never break prompt
+     * admission, so an unreadable flag is treated as "routing enabled".
+     */
+    async function routingDisabled(sessionID: string): Promise<boolean> {
+        try {
+            return await isRoutingDisabled(storage, sessionID)
+        } catch (error) {
+            logger.warn("could not read the routing toggle:", error)
+            return false
+        }
+    }
+
     return async function onPrompt(event: PromptEvent): Promise<void> {
         const { sessionID, messageID } = event
         const key = `${sessionID}:${messageID}`
@@ -117,6 +136,12 @@ export function createPromptRouter(deps: PromptRouterDeps) {
             return
         }
 
+        if (await routingDisabled(sessionID)) {
+            logger.debug("skipped: routing disabled for session")
+            await clearRouted(sessionID)
+            return
+        }
+
         const trimmedText = text.trimStart()
         if (config.ignoredPrefixes.some((prefix) => trimmedText.startsWith(prefix))) {
             logger.debug("skipped: ignored prefix", trimmedText.slice(0, 32))
@@ -143,6 +168,11 @@ export function createPromptRouter(deps: PromptRouterDeps) {
             }
             await routePrompt(event, routerBaseUrl)
         } catch (error: unknown) {
+            if (await routingDisabled(sessionID)) {
+                logger.debug("skipped fallback switch: routing disabled for session")
+                await clearRouted(sessionID)
+                return
+            }
             if (config.onError === "keep") {
                 logger.error("jev routing failed; keeping the session model:", error)
                 await clearRouted(sessionID)
@@ -223,6 +253,13 @@ export function createPromptRouter(deps: PromptRouterDeps) {
         logger.info("routing decision:", description)
 
         if (!keepSessionModel) {
+            // The toggle may have flipped while the classifier was running:
+            // never override a manually chosen model after /jev-off.
+            if (await routingDisabled(sessionID)) {
+                logger.debug("skipped model switch: routing disabled for session")
+                await clearRouted(sessionID)
+                return
+            }
             await session.switchModel({ sessionID, model: { providerID: provider, id: model } })
         }
 

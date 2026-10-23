@@ -14,7 +14,7 @@ Routing is best-effort. Every failure is contained: the prompt is always
 admitted, on the fallback model or on the current session model.
 
 ```
-prompt ──► prompt hook ──► skip? (empty, prefix, agent, length) ──► yes: unchanged
+prompt ──► prompt hook ──► skip? (empty, prefix, agent, length, routing off) ──► yes: unchanged
                 │
                 ▼
      stored decision for this messageID? ──► yes: reuse (hook re-run)
@@ -144,7 +144,7 @@ options.
 | `minimumPromptLength` | integer ≥ 0 | `100` | Characters after mention stripping. Shorter prompts are not classified. |
 | `minimumThresholdConfidence` | number in [0, 1] | `0.5` | Minimum `model_tier` confidence to trust the tier. |
 | `timeoutMs` | integer ≥ 1 | `5000` | Classifier request timeout. |
-| `ignoredPrefixes` | string[] | `["/help", "/models", "/connect", "/logout", "/clear", "/jev"]` | Prompts starting with one of these (after leading whitespace) are not classified. Replaces the default list; when `statusCommand` is true, `/jev` is appended if absent. |
+| `ignoredPrefixes` | string[] | `["/help", "/models", "/connect", "/logout", "/clear", "/jev", "/jev-off", "/jev-on"]` | Prompts starting with one of these (after leading whitespace) are not classified. Replaces the default list; when `statusCommand` is true, the plugin's own commands are appended if absent. |
 | `ignoredAgents` | string[] | `["title", "compaction"]` | Prompts mentioning one of these agents are not classified. Replaces the default list. |
 | `previousContext.enabled` | boolean | `true` | Send a summary of the previous turn. |
 | `previousContext.maxPreviewChars` | integer ≥ 0 | `240` | Length of the previous user and assistant text previews. |
@@ -152,7 +152,7 @@ options.
 | `reasoningEffort.providers` | `{[providerID]: string}` | `{"openrouter": "reasoning_effort", "openai": "reasoningEffort"}` | Provider option key that receives the effort. Merged over the default; `""` opts a provider out. |
 | `reasoningEffort.values` | `{[effort]: string}` | `{}` | Rewrite effort values, e.g. `{"high": "xhigh"}`. Merged over the default. |
 | `onError` | `"fallback"` \| `"keep"` | `"fallback"` | On classifier or routing failure: switch to `fallback`, or leave the session model alone. |
-| `statusCommand` | boolean | `true` | Register the `/jev` command. |
+| `statusCommand` | boolean | `true` | Register the `/jev`, `/jev-off` and `/jev-on` commands. |
 | `logLevel` | `"off"` \| `"error"` \| `"warn"` \| `"info"` \| `"debug"` | `"warn"` | See [Logging](#logging). |
 | `logFile` | string | `$XDG_STATE_HOME/opencode/jev-router.log` | Default `~/.local/state/opencode/jev-router.log`. |
 | `logging` | boolean | — | Deprecated. `true` maps to `logLevel: "info"`, `false` to `"off"`. An explicit `logLevel` wins. |
@@ -204,6 +204,9 @@ The result is checked against the OpenCode model registry. If it is not
 registered, `fallback` is used; if `fallback` is not registered either, the
 session model is kept. Each step logs at `warn`.
 
+While routing is off for the session (`/jev-off`) nothing is resolved at all:
+no classifier call, no model switch.
+
 The decision is stored, the session is switched, and a synthetic message is
 added to the transcript with `resume: false`:
 
@@ -239,6 +242,7 @@ call:
 
 ```text
 [JEV ROUTER STATUS]
+routing: on
 requests: 2
 input_tokens: 2400
 output_tokens: 192
@@ -254,11 +258,25 @@ model_tier: powerful (93%)
 block ends with `last_decision: none` before the first classification. Set
 `statusCommand: false` to not register the command.
 
+## `/jev-off` and `/jev-on`
+
+`/jev-off` switches the router off for the current session: no classifier
+call, no model switch, and the model chosen by hand is preserved.
+`/jev-on` switches it back on. Both are per session and survive a plugin
+reload; the state is stored in the plugin storage.
+
+The toggle is also checked while a prompt is in flight. If `/jev-off` runs
+while the classifier is answering, the pending model switch is dropped, so a
+manual model is never overridden after the toggle was flipped.
+
+`/jev` shows the current state (`routing: on` / `routing: off`).
+
 ## Failure semantics
 
 | Situation | Classifier call | Model change | Log |
 | --- | --- | --- | --- |
 | Empty prompt, ignored prefix, ignored agent, too short | no | none | `debug` |
+| Routing disabled for the session (`/jev-off`) | no | none | `debug` |
 | Router provider missing or without `baseURL` | no | none | `warn` `provider … not found; skipping routing` |
 | No key, timeout, HTTP error, malformed response | yes (except no key) | `fallback`, or none with `onError: "keep"` | `error` `jev routing failed; …` |
 | Routed model not registered | yes | `fallback` | `warn` |
@@ -276,6 +294,7 @@ Plugin storage (`ctx.storage`), one entry per session:
 | --- | --- |
 | `jev/decision/<sessionID>` | `{sessionID, messageID, createdAt, response, resolved?: {provider, model}}`; last decision; `resolved` is absent when the session model was kept, after a skipped prompt, and after a routing failure. |
 | `jev/usage/<sessionID>` | `{cost, inputTokens, outputTokens, requests, lastMessageID}`; classifier usage, counted once per message. |
+| `jev/routing-disabled/<sessionID>` | `true` while `/jev-off` is active for the session; the entry is deleted by `/jev-on`. |
 
 ## Logging
 

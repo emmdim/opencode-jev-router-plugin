@@ -69,7 +69,16 @@ function defaults(): RuntimeConfig {
         minimumPromptLength: 100,
         minimumThresholdConfidence: 0.5,
         timeoutMs: 5000,
-        ignoredPrefixes: ["/help", "/models", "/connect", "/logout", "/clear", "/jev"],
+        ignoredPrefixes: [
+            "/help",
+            "/models",
+            "/connect",
+            "/logout",
+            "/clear",
+            "/jev",
+            "/jev-off",
+            "/jev-on",
+        ],
         ignoredAgents: ["title", "compaction"],
         previousContext: { enabled: true, maxPreviewChars: 240, maxFiles: 10 },
         reasoningEffort: {
@@ -371,8 +380,13 @@ export function normalizeConfig(options: unknown, warn: Warn = () => {}): Runtim
         ),
     }
 
-    if (resolved.statusCommand && !resolved.ignoredPrefixes.includes("/jev")) {
-        resolved.ignoredPrefixes = [...resolved.ignoredPrefixes, "/jev"]
+    if (resolved.statusCommand) {
+        // The plugin's own commands must never be classified as prompts.
+        for (const command of ["/jev", "/jev-off", "/jev-on"]) {
+            if (!resolved.ignoredPrefixes.includes(command)) {
+                resolved.ignoredPrefixes = [...resolved.ignoredPrefixes, command]
+            }
+        }
     }
 
     return resolved

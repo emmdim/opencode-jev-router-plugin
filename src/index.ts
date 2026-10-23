@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode/plugin"
 import { authFileSource, envSource, integrationSource, resolveApiKey } from "./auth.ts"
-import { createStatusCommand } from "./command.ts"
+import { createStatusCommand, createToggleCommand } from "./command.ts"
 import { normalizeConfig } from "./config.ts"
 import { createEffortHook, effortProviders } from "./effort.ts"
 import { initLogger } from "./logger.ts"
@@ -68,12 +68,32 @@ const plugin: Plugin.Plugin = {
                 registrations.push(await ctx.session.hook("context", onContext, { providerID }))
             }
             if (config.statusCommand) {
-                const command = createStatusCommand({
-                    storage: ctx.storage,
-                    session: ctx.session,
-                    logger,
-                })
-                registrations.push(await ctx.command.transform((editor) => editor.add(command)))
+                const commands = [
+                    createStatusCommand({
+                        storage: ctx.storage,
+                        session: ctx.session,
+                        logger,
+                    }),
+                    createToggleCommand({
+                        storage: ctx.storage,
+                        session: ctx.session,
+                        logger,
+                        disabled: true,
+                    }),
+                    createToggleCommand({
+                        storage: ctx.storage,
+                        session: ctx.session,
+                        logger,
+                        disabled: false,
+                    }),
+                ]
+                registrations.push(
+                    await ctx.command.transform((editor) => {
+                        for (const command of commands) {
+                            editor.add(command)
+                        }
+                    }),
+                )
             }
         } catch (error) {
             await Promise.allSettled(registrations.map((registration) => registration.dispose()))

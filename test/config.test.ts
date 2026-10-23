@@ -31,6 +31,8 @@ describe("normalizeConfig defaults", () => {
             "/logout",
             "/clear",
             "/jev",
+            "/jev-off",
+            "/jev-on",
         ])
         expect(config.ignoredAgents).toEqual(["title", "compaction"])
         expect(config.previousContext).toEqual({

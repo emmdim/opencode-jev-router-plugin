@@ -8,6 +8,8 @@ import type { JevRoutingResponse, ModelTier, RoutingTaskType } from "./jev.ts"
 export interface JsonStorage {
     get(key: string): Promise<unknown>
     set(key: string, value: unknown): Promise<void>
+    /** Optional delete; used to drop the routing toggle instead of storing false. */
+    remove?(key: string): Promise<void>
 }
 
 /**
@@ -27,6 +29,39 @@ export const DECISION_KEY_PREFIX = "jev/decision/"
 
 export function decisionKey(sessionID: string): string {
     return `${DECISION_KEY_PREFIX}${sessionID}`
+}
+
+/** Per-session routing toggle. Absent means routing is enabled. */
+export const ROUTING_DISABLED_KEY_PREFIX = "jev/routing-disabled/"
+
+export function routingDisabledKey(sessionID: string): string {
+    return `${ROUTING_DISABLED_KEY_PREFIX}${sessionID}`
+}
+
+/** True when routing is switched off for the session. */
+export async function isRoutingDisabled(storage: JsonStorage, sessionID: string): Promise<boolean> {
+    return (await storage.get(routingDisabledKey(sessionID))) === true
+}
+
+/** Switch routing off or on for the session. */
+export async function setRoutingDisabled(
+    storage: JsonStorage,
+    sessionID: string,
+    disabled: boolean,
+): Promise<void> {
+    const key = routingDisabledKey(sessionID)
+
+    if (!disabled) {
+        // Prefer deleting the key; fall back to an explicit false value.
+        if (typeof storage.remove === "function") {
+            await storage.remove(key)
+            return
+        }
+        await storage.set(key, false)
+        return
+    }
+
+    await storage.set(key, true)
 }
 
 export async function saveDecision(storage: JsonStorage, decision: StoredDecision): Promise<void> {
